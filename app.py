@@ -15,21 +15,22 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO PER LARGHEZZA E LEGGIBILITÀ ---
+# --- CSS PERSONALIZZATO PER LARGHEZZA E VISIBILITÀ ORARI ---
 st.markdown("""
     <style>
         [data-testid="column"] {
-            padding: 2px !important;
+            padding: 1px !important;
         }
         div[data-baseweb="select"] {
+            width: 100% !important;
             min-width: 100% !important;
         }
         div[data-baseweb="select"] > div {
-            font-size: 12px !important;
+            font-size: 13px !important;
             font-weight: bold !important;
             padding-left: 4px !important;
             padding-right: 4px !important;
-            min-height: 34px !important;
+            min-height: 32px !important;
             background-color: #1E222A !important;
             color: #00FF7F !important;
             border: 1px solid #366092 !important;
@@ -45,9 +46,16 @@ st.markdown("""
             border-radius: 4px;
             margin-bottom: 4px;
         }
+        .time-label {
+            font-size: 9px;
+            color: #4A90E2;
+            font-weight: bold;
+            margin-top: 1px;
+            margin-bottom: 0px;
+        }
         .shift-label {
             font-size: 10px;
-            color: #AAAAAA;
+            color: #F39C12;
             font-weight: bold;
             margin-top: 4px;
         }
@@ -60,24 +68,16 @@ ITALIAN_MONTHS = [
 ]
 ITALIAN_DAYS = ["LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM"]
 
-# Generazione fasce orarie comuni predefinite (In - Out)
-SHIFT_TIME_OPTIONS = ["--:-- - --:--"]
-for h_in in range(6, 23):
-    for duration in [4, 6, 7, 8, 12]:
-        h_out = (h_in + duration) % 24
-        SHIFT_TIME_OPTIONS.append(f"{h_in:02d}:00 - {h_out:02d}:00")
-        SHIFT_TIME_OPTIONS.append(f"{h_in:02d}:30 - {h_out:02d}:30")
-
 ALL_HOURS = ["--:--"]
 for h in range(24):
     for m in [0, 30]:
         ALL_HOURS.append(f"{h:02d}:{m:02d}")
 
 def time_to_hours(time_str):
-    if not time_str or ":" not in time_str or time_str == "--:--":
+    if not time_str or ":" not in str(time_str) or str(time_str).strip() == "--:--":
         return 0.0
     try:
-        parts = time_str.split(":")
+        parts = str(time_str).strip().split(":")
         return int(parts[0]) + int(parts[1]) / 60.0
     except Exception:
         return 0.0
@@ -88,7 +88,7 @@ def calculate_shift_hours(in_time, out_time):
     diff = out_h - in_h
     if diff < 0:
         diff += 24.0
-    return diff if (in_time and out_time and in_time != "--:--" and out_time != "--:--") else 0.0
+    return diff if (in_time and out_time and str(in_time).strip() != "--:--" and str(out_time).strip() != "--:--") else 0.0
 
 # --- INIZIALIZZAZIONE STATE ---
 if "operators" not in st.session_state:
@@ -106,8 +106,8 @@ def load_data_from_disk():
         try:
             with open(ANAG_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                st.session_state.operators = data.get("operators", [])
-                st.session_state.clients = data.get("clients", [])
+                st.session_state.operators = [str(x).strip() for x in data.get("operators", []) if str(x).strip()]
+                st.session_state.clients = [str(x).strip() for x in data.get("clients", []) if str(x).strip()]
         except Exception:
             pass
 
@@ -119,8 +119,8 @@ def load_data_from_disk():
                 for k, v in raw_data.items():
                     parts = k.split("|")
                     if len(parts) == 5:
-                        client, y, m, d, off = parts[0], int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
-                        st.session_state.schedule_data[(client, y, m, d, off)] = v
+                        client, y, m, d, off = parts[0].strip(), int(parts[1]), int(parts[2]), int(parts[3]), int(parts[4])
+                        st.session_state.schedule_data[(client, y, m, d, off)] = (str(v[0]).strip(), str(v[1]).strip(), str(v[2]).strip())
         except Exception:
             pass
 
@@ -147,27 +147,28 @@ def on_shift_change(client_name, year, month_idx, day, r_offset):
     k_in = f"in_{client_name}_{day}_{r_offset}"
     k_out = f"out_{client_name}_{day}_{r_offset}"
     
-    v_op = st.session_state.get(k_op, "Nessuno")
-    v_in = st.session_state.get(k_in, "--:--")
-    v_out = st.session_state.get(k_out, "--:--")
+    v_op = str(st.session_state.get(k_op, "Nessuno")).strip()
+    v_in = str(st.session_state.get(k_in, "--:--")).strip()
+    v_out = str(st.session_state.get(k_out, "--:--")).strip()
     
-    st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = (
-        "" if v_op == "Nessuno" else str(v_op).strip(),
-        "" if v_in == "--:--" else str(v_in).strip(),
-        "" if v_out == "--:--" else str(v_out).strip()
+    st.session_state.schedule_data[(client_name.strip(), year, month_idx, day, r_offset)] = (
+        "" if v_op == "Nessuno" else v_op,
+        "" if v_in == "--:--" else v_in,
+        "" if v_out == "--:--" else v_out
     )
     save_data_to_disk()
 
-# --- CALLBACK PER PULISCI TURNI ---
+# --- CALLBACK SICURA PER PULIRE I TURNI ---
 def clear_shifts_callback(clients_to_clear, days_to_clear, year, month_idx):
     for client_name in clients_to_clear:
+        c_clean = client_name.strip()
         for day in days_to_clear:
             for r_offset in range(3):
-                st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
+                st.session_state.schedule_data[(c_clean, year, month_idx, day, r_offset)] = ("", "", "")
                 
-                k_op = f"op_{client_name}_{day}_{r_offset}"
-                k_in = f"in_{client_name}_{day}_{r_offset}"
-                k_out = f"out_{client_name}_{day}_{r_offset}"
+                k_op = f"op_{c_clean}_{day}_{r_offset}"
+                k_in = f"in_{c_clean}_{day}_{r_offset}"
+                k_out = f"out_{c_clean}_{day}_{r_offset}"
                 
                 st.session_state[k_op] = "Nessuno"
                 st.session_state[k_in] = "--:--"
@@ -208,7 +209,7 @@ def generate_monthly_a3_pdf(year, month_idx):
             for day in days_list:
                 day_shifts = []
                 for r_offset in range(3):
-                    op_val, in_val, out_val = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("", "", ""))
+                    op_val, in_val, out_val = st.session_state.schedule_data.get((client_name.strip(), year, month_idx, day, r_offset), ("", "", ""))
                     if op_val and in_val and op_val != "Nessuno" and in_val != "--:--":
                         day_shifts.append(f"<b>{op_val}</b> ({in_val}-{out_val})")
                 cell_txt = "<br/>".join(day_shifts) if day_shifts else "-"
@@ -273,7 +274,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     ]]
 
     tot_hours = 0.0
-    subj_clean = str(subject_name).strip().lower()
+    target_clean = str(subject_name).strip().lower()
 
     for day in range(1, num_days + 1):
         wday_idx = calendar.weekday(year, month_idx, day)
@@ -283,15 +284,17 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
         entries = []
         if subject_type == "Operatore":
             for c_name in st.session_state.clients:
+                c_clean = str(c_name).strip()
                 for off in range(3):
-                    opv, inv, outv = st.session_state.schedule_data.get((c_name, year, month_idx, day, off), ("", "", ""))
-                    if str(opv).strip().lower() == subj_clean and inv and outv and inv != "--:--" and outv != "--:--":
+                    opv, inv, outv = st.session_state.schedule_data.get((c_clean, year, month_idx, day, off), ("", "", ""))
+                    if str(opv).strip().lower() == target_clean and inv and outv and inv != "--:--" and outv != "--:--":
                         h = calculate_shift_hours(inv, outv)
                         tot_hours += h
-                        entries.append((inv, outv, f"{h:.2f} h", c_name))
+                        entries.append((inv, outv, f"{h:.2f} h", c_clean))
         else:
+            c_clean = str(subject_name).strip()
             for off in range(3):
-                opv, inv, outv = st.session_state.schedule_data.get((subject_name, year, month_idx, day, off), ("", "", ""))
+                opv, inv, outv = st.session_state.schedule_data.get((c_clean, year, month_idx, day, off), ("", "", ""))
                 if inv and outv and inv != "--:--" and outv != "--:--":
                     h = calculate_shift_hours(inv, outv)
                     tot_hours += h
@@ -405,7 +408,7 @@ def generate_excel_bytes(year, month_idx):
             r = client_start_row + r_offset
             for day in range(1, num_days + 1):
                 col_op = 2 + (day - 1) * 3
-                val_op, val_in, val_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("", "", ""))
+                val_op, val_in, val_out = st.session_state.schedule_data.get((client_name.strip(), year, month_idx, day, r_offset), ("", "", ""))
                 ws_sched.cell(row=r, column=col_op, value=val_op if val_op != "Nessuno" else "")
                 ws_sched.cell(row=r, column=col_op+1, value=val_in if val_in != "--:--" else "")
                 ws_sched.cell(row=r, column=col_op+2, value=val_out if val_out != "--:--" else "")
@@ -496,7 +499,8 @@ elif menu == "Pianificazione Settimanale":
         st.markdown(f"### 🗓️ Settimana: **{days_to_show[0]} — {days_to_show[-1]} {month_str} {year}**")
 
         for client_name in clients_to_display:
-            st.markdown(f"#### 👤 Cliente: `{client_name}`")
+            c_clean = client_name.strip()
+            st.markdown(f"#### 👤 Cliente: `{c_clean}`")
             cols = st.columns(len(days_to_show))
             
             for d_i, day in enumerate(days_to_show):
@@ -505,7 +509,7 @@ elif menu == "Pianificazione Settimanale":
                     st.markdown(f"<div class='day-header'>{day} {ITALIAN_DAYS[w_i]}</div>", unsafe_allow_html=True)
                     
                     for r_offset in range(3):
-                        s_op, s_in, s_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
+                        s_op, s_in, s_out = st.session_state.schedule_data.get((c_clean, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
                         init_op = s_op if s_op in active_ops else "Nessuno"
                         init_in = s_in if s_in in ALL_HOURS else "--:--"
                         init_out = s_out if s_out in ALL_HOURS else "--:--"
@@ -513,27 +517,25 @@ elif menu == "Pianificazione Settimanale":
                         st.markdown(f"<div class='shift-label'>T{r_offset+1} Operatore</div>", unsafe_allow_html=True)
                         st.selectbox(
                             f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), 
-                            key=f"op_{client_name}_{day}_{r_offset}", 
-                            on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
+                            key=f"op_{c_clean}_{day}_{r_offset}", 
+                            on_change=on_shift_change, args=(c_clean, year, month_idx, day, r_offset),
                             label_visibility="collapsed"
                         )
                         
-                        st.markdown(f"<div class='shift-label'>T{r_offset+1} Entrata / Uscita</div>", unsafe_allow_html=True)
-                        col_in_sub, col_out_sub = st.columns(2)
-                        with col_in_sub:
-                            st.selectbox(
-                                f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), 
-                                key=f"in_{client_name}_{day}_{r_offset}", 
-                                on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
-                                label_visibility="collapsed"
-                            )
-                        with col_out_sub:
-                            st.selectbox(
-                                f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), 
-                                key=f"out_{client_name}_{day}_{r_offset}", 
-                                on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
-                                label_visibility="collapsed"
-                            )
+                        st.markdown("<div class='time-label'>Entrata</div>", unsafe_allow_html=True)
+                        st.selectbox(
+                            f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), 
+                            key=f"in_{c_clean}_{day}_{r_offset}", 
+                            on_change=on_shift_change, args=(c_clean, year, month_idx, day, r_offset),
+                            label_visibility="collapsed"
+                        )
+                        st.markdown("<div class='time-label'>Uscita</div>", unsafe_allow_html=True)
+                        st.selectbox(
+                            f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), 
+                            key=f"out_{c_clean}_{day}_{r_offset}", 
+                            on_change=on_shift_change, args=(c_clean, year, month_idx, day, r_offset),
+                            label_visibility="collapsed"
+                        )
             st.markdown("---")
 
         st.button(
@@ -585,13 +587,15 @@ elif menu == "Riepilogo Mensile":
         target_clean = str(target).strip().lower()
         for day in range(1, num_days + 1):
             if sum_type == "Clienti":
+                c_clean = str(target).strip()
                 for off in range(3):
-                    _, inv, outv = st.session_state.schedule_data.get((target, sum_year, sum_month_idx, day, off), ("", "", ""))
+                    _, inv, outv = st.session_state.schedule_data.get((c_clean, sum_year, sum_month_idx, day, off), ("", "", ""))
                     tot_h += calculate_shift_hours(inv, outv)
             else:
                 for c_name in st.session_state.clients:
+                    c_clean = str(c_name).strip()
                     for off in range(3):
-                        opv, inv, outv = st.session_state.schedule_data.get((c_name, sum_year, sum_month_idx, day, off), ("", "", ""))
+                        opv, inv, outv = st.session_state.schedule_data.get((c_clean, sum_year, sum_month_idx, day, off), ("", "", ""))
                         if str(opv).strip().lower() == target_clean:
                             tot_h += calculate_shift_hours(inv, outv)
         grand_total += tot_h
