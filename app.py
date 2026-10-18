@@ -132,6 +132,23 @@ def save_data_to_disk():
 if not st.session_state.operators and not st.session_state.clients:
     load_data_from_disk()
 
+# --- CALLBACK PER SALVATAGGIO AUTOMATICO AD OGNI SINGOLA SELEZIONE ---
+def on_shift_change(client_name, year, month_idx, day, r_offset):
+    k_op = f"op_{client_name}_{day}_{r_offset}"
+    k_in = f"in_{client_name}_{day}_{r_offset}"
+    k_out = f"out_{client_name}_{day}_{r_offset}"
+    
+    v_op = st.session_state.get(k_op, "Nessuno")
+    v_in = st.session_state.get(k_in, "--:--")
+    v_out = st.session_state.get(k_out, "--:--")
+    
+    st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = (
+        "" if v_op == "Nessuno" else v_op,
+        "" if v_in == "--:--" else v_in,
+        "" if v_out == "--:--" else v_out
+    )
+    save_data_to_disk()
+
 # --- GENERAZIONE PDF A3 ---
 def generate_monthly_a3_pdf(year, month_idx):
     month_str = ITALIAN_MONTHS[month_idx - 1]
@@ -288,7 +305,7 @@ if menu == "Anagrafica":
         save_data_to_disk()
         st.success("✅ Anagrafica salvata!")
 
-# ================= 2. PIANIFICAZIONE SETTIMANALE =================
+# ================= 2. PIANIFICAZIONE SETTIMANALE CON SALVATAGGIO AUTOMATICO E FILTRO CLIENTE =================
 elif menu == "Pianificazione Settimanale":
     st.title("📅 Pianificazione Turni Settimanale")
 
@@ -298,7 +315,8 @@ elif menu == "Pianificazione Settimanale":
     if not active_clients:
         st.warning("⚠️ Nessun cliente salvato. Vai prima nella sezione **Anagrafica**.")
     else:
-        c1, c2, c3, c4 = st.columns([1, 1, 1.5, 1.5])
+        # MENU DI SELEZIONE FILTRI
+        c1, c2, c3, c4, c5 = st.columns([1, 1, 1.2, 1.5, 1.2])
         with c1:
             year = st.selectbox("Anno", [2026, 2027, 2028, 2029, 2030], index=0, key="sel_year")
         with c2:
@@ -314,10 +332,12 @@ elif menu == "Pianificazione Settimanale":
                 "5ª Settimana (29 - fine)"
             ], key="sel_week")
         with c4:
+            selected_client_filter = st.selectbox("Seleziona Cliente", ["TUTTI I CLIENTI"] + active_clients, index=0)
+        with c5:
             st.write("🖨️ **Stampa Mese**")
             pdf_a3_bytes = generate_monthly_a3_pdf(year, month_idx)
             st.download_button(
-                label="📄 Stampa PDF A3",
+                label="📄 PDF A3",
                 data=pdf_a3_bytes,
                 file_name=f"Programma_A3_{month_str}_{year}.pdf",
                 mime="application/pdf"
@@ -329,64 +349,59 @@ elif menu == "Pianificazione Settimanale":
         elif "4ª" in week_choice: days_to_show = list(range(22, min(29, num_days_total + 1)))
         else: days_to_show = list(range(29, num_days_total + 1))
 
+        # Filtraggio clienti da mostrare
+        clients_to_display = active_clients if selected_client_filter == "TUTTI I CLIENTI" else [selected_client_filter]
+
         st.markdown(f"### 🗓️ Settimana: **{days_to_show[0]} — {days_to_show[-1]} {month_str} {year}**")
 
-        with st.form("weekly_schedule_form"):
-            for client_name in active_clients:
-                st.markdown(f"#### 👤 Cliente: `{client_name}`")
-                cols = st.columns(len(days_to_show))
-                
-                for d_i, day in enumerate(days_to_show):
-                    w_i = calendar.weekday(year, month_idx, day)
-                    with cols[d_i]:
-                        st.markdown(f"<div class='day-header'>{day} {ITALIAN_DAYS[w_i]}</div>", unsafe_allow_html=True)
+        for client_name in clients_to_display:
+            st.markdown(f"#### 👤 Cliente: `{client_name}`")
+            cols = st.columns(len(days_to_show))
+            
+            for d_i, day in enumerate(days_to_show):
+                w_i = calendar.weekday(year, month_idx, day)
+                with cols[d_i]:
+                    st.markdown(f"<div class='day-header'>{day} {ITALIAN_DAYS[w_i]}</div>", unsafe_allow_html=True)
+                    
+                    for r_offset in range(3):
+                        s_op, s_in, s_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
+                        init_op = s_op if s_op in active_ops else "Nessuno"
+                        init_in = s_in if s_in in ALL_HOURS else "--:--"
+                        init_out = s_out if s_out in ALL_HOURS else "--:--"
+
+                        st.markdown(f"<div class='shift-label'>Turno {r_offset+1}</div>", unsafe_allow_html=True)
+                        st.selectbox(
+                            f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), 
+                            key=f"op_{client_name}_{day}_{r_offset}", 
+                            on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
+                            label_visibility="collapsed"
+                        )
                         
-                        for r_offset in range(3):
-                            s_op, s_in, s_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
-                            init_op = s_op if s_op in active_ops else "Nessuno"
-                            init_in = s_in if s_in in ALL_HOURS else "--:--"
-                            init_out = s_out if s_out in ALL_HOURS else "--:--"
-
-                            st.markdown(f"<div class='shift-label'>Turno {r_offset+1}</div>", unsafe_allow_html=True)
-                            st.selectbox(f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
-                            
-                            c_in, c_out = st.columns(2)
-                            with c_in:
-                                st.selectbox(f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), key=f"in_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
-                            with c_out:
-                                st.selectbox(f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), key=f"out_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
-                st.markdown("---")
-
-            col_btn_save, col_btn_clear = st.columns([3, 1])
-            with col_btn_save:
-                save_btn = st.form_submit_button("💾 Salva Modifiche Settimana", type="primary")
-            with col_btn_clear:
-                clear_btn = st.form_submit_button("🧹 Pulisci Turni Settimana")
-
-            if save_btn:
-                for client_name in active_clients:
-                    for day in days_to_show:
-                        for r_offset in range(3):
-                            v_op = st.session_state[f"op_{client_name}_{day}_{r_offset}"]
-                            v_in = st.session_state[f"in_{client_name}_{day}_{r_offset}"]
-                            v_out = st.session_state[f"out_{client_name}_{day}_{r_offset}"]
-                            
-                            st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = (
-                                "" if v_op == "Nessuno" else v_op,
-                                "" if v_in == "--:--" else v_in,
-                                "" if v_out == "--:--" else v_out
+                        c_in, c_out = st.columns(2)
+                        with c_in:
+                            st.selectbox(
+                                f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), 
+                                key=f"in_{client_name}_{day}_{r_offset}", 
+                                on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
+                                label_visibility="collapsed"
                             )
-                save_data_to_disk()
-                st.success("✅ Turni della settimana salvati con successo!")
+                        with c_out:
+                            st.selectbox(
+                                f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), 
+                                key=f"out_{client_name}_{day}_{r_offset}", 
+                                on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
+                                label_visibility="collapsed"
+                            )
+            st.markdown("---")
 
-            if clear_btn:
-                for client_name in active_clients:
-                    for day in days_to_show:
-                        for r_offset in range(3):
-                            st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
-                save_data_to_disk()
-                st.warning("🧹 Tutti i turni della settimana selezionata sono stati puliti e resettati!")
-                st.rerun()
+        if st.button("🧹 Pulisci Turni Settimana (Per i clienti visibili)"):
+            for client_name in clients_to_display:
+                for day in days_to_show:
+                    for r_offset in range(3):
+                        st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
+            save_data_to_disk()
+            st.warning("🧹 Turni resettati!")
+            st.rerun()
 
 # ================= 3. RIEPILOGO MENSILE =================
 elif menu == "Riepilogo Mensile":
