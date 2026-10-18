@@ -88,8 +88,6 @@ if "clients" not in st.session_state:
     st.session_state.clients = []
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = {}
-if "has_unsaved_changes" not in st.session_state:
-    st.session_state.has_unsaved_changes = False
 
 ANAG_FILE = "anagrafica.json"
 SCHED_FILE = "turni_salvati.json"
@@ -128,7 +126,6 @@ def save_data_to_disk():
             raw_data[f"{client}|{y}|{m}|{d}|{off}"] = v
         with open(SCHED_FILE, "w", encoding="utf-8") as f:
             json.dump(raw_data, f, ensure_ascii=False, indent=4)
-        st.session_state.has_unsaved_changes = False
     except Exception as e:
         st.error(f"Errore di salvataggio: {e}")
 
@@ -291,7 +288,7 @@ if menu == "Anagrafica":
         save_data_to_disk()
         st.success("✅ Anagrafica salvata!")
 
-# ================= 2. PIANIFICAZIONE SETTIMANALE CON PULISCI E CONTROLLO SALVATAGGIO =================
+# ================= 2. PIANIFICAZIONE SETTIMANALE =================
 elif menu == "Pianificazione Settimanale":
     st.title("📅 Pianificazione Turni Settimanale")
 
@@ -301,11 +298,6 @@ elif menu == "Pianificazione Settimanale":
     if not active_clients:
         st.warning("⚠️ Nessun cliente salvato. Vai prima nella sezione **Anagrafica**.")
     else:
-        # Inizializzazione chiavi correnti di tracciamento
-        if "prev_year" not in st.session_state: st.session_state.prev_year = 2026
-        if "prev_month" not in st.session_state: st.session_state.prev_month = "Ottobre"
-        if "prev_week" not in st.session_state: st.session_state.prev_week = "1ª Settimana (1 - 7)"
-
         c1, c2, c3, c4 = st.columns([1, 1, 1.5, 1.5])
         with c1:
             year = st.selectbox("Anno", [2026, 2027, 2028, 2029, 2030], index=0, key="sel_year")
@@ -331,58 +323,6 @@ elif menu == "Pianificazione Settimanale":
                 mime="application/pdf"
             )
 
-        # Controllo cambio periodo con modifiche pendenti
-        period_changed = (year != st.session_state.prev_year or month_str != st.session_state.prev_month or week_choice != st.session_state.prev_week)
-        
-        if period_changed and st.session_state.has_unsaved_changes:
-            st.warning("⚠️ Hai apportato modifiche ai turni non ancora salvate. Vuoi salvarle prima di cambiare la vista?")
-            btn_save_prev, btn_discard_prev = st.columns(2)
-            with btn_save_prev:
-                if st.button("💾 Salva e Prosegui", type="primary"):
-                    # Salva le modifiche della settimana precedente
-                    p_year = st.session_state.prev_year
-                    p_month_idx = ITALIAN_MONTHS.index(st.session_state.prev_month) + 1
-                    p_num_days = calendar.monthrange(p_year, p_month_idx)[1]
-                    
-                    if "1ª" in st.session_state.prev_week: p_days = list(range(1, min(8, p_num_days + 1)))
-                    elif "2ª" in st.session_state.prev_week: p_days = list(range(8, min(15, p_num_days + 1)))
-                    elif "3ª" in st.session_state.prev_week: p_days = list(range(15, min(22, p_num_days + 1)))
-                    elif "4ª" in st.session_state.prev_week: p_days = list(range(22, min(29, p_num_days + 1)))
-                    else: p_days = list(range(29, p_num_days + 1))
-
-                    for client_name in active_clients:
-                        for day in p_days:
-                            for r_offset in range(3):
-                                k_op = f"op_{client_name}_{day}_{r_offset}"
-                                k_in = f"in_{client_name}_{day}_{r_offset}"
-                                k_out = f"out_{client_name}_{day}_{r_offset}"
-                                if k_op in st.session_state:
-                                    v_op = st.session_state[k_op]
-                                    v_in = st.session_state[k_in]
-                                    v_out = st.session_state[k_out]
-                                    st.session_state.schedule_data[(client_name, p_year, p_month_idx, day, r_offset)] = (
-                                        "" if v_op == "Nessuno" else v_op,
-                                        "" if v_in == "--:--" else v_in,
-                                        "" if v_out == "--:--" else v_out
-                                    )
-                    save_data_to_disk()
-                    st.session_state.prev_year = year
-                    st.session_state.prev_month = month_str
-                    st.session_state.prev_week = week_choice
-                    st.rerun()
-
-            with btn_discard_prev:
-                if st.button("⚠️ Ignora e Cambia"):
-                    st.session_state.has_unsaved_changes = False
-                    st.session_state.prev_year = year
-                    st.session_state.prev_month = month_str
-                    st.session_state.prev_week = week_choice
-                    st.rerun()
-        else:
-            st.session_state.prev_year = year
-            st.session_state.prev_month = month_str
-            st.session_state.prev_week = week_choice
-
         if "1ª" in week_choice: days_to_show = list(range(1, min(8, num_days_total + 1)))
         elif "2ª" in week_choice: days_to_show = list(range(8, min(15, num_days_total + 1)))
         elif "3ª" in week_choice: days_to_show = list(range(15, min(22, num_days_total + 1)))
@@ -390,10 +330,6 @@ elif menu == "Pianificazione Settimanale":
         else: days_to_show = list(range(29, num_days_total + 1))
 
         st.markdown(f"### 🗓️ Settimana: **{days_to_show[0]} — {days_to_show[-1]} {month_str} {year}**")
-
-        # Funzione callback per contrassegnare modifiche
-        def mark_changed():
-            st.session_state.has_unsaved_changes = True
 
         with st.form("weekly_schedule_form"):
             for client_name in active_clients:
@@ -412,13 +348,13 @@ elif menu == "Pianificazione Settimanale":
                             init_out = s_out if s_out in ALL_HOURS else "--:--"
 
                             st.markdown(f"<div class='shift-label'>Turno {r_offset+1}</div>", unsafe_allow_html=True)
-                            st.selectbox(f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", on_change=mark_changed, label_visibility="collapsed")
+                            st.selectbox(f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                             
                             c_in, c_out = st.columns(2)
                             with c_in:
-                                st.selectbox(f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), key=f"in_{client_name}_{day}_{r_offset}", on_change=mark_changed, label_visibility="collapsed")
+                                st.selectbox(f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), key=f"in_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                             with c_out:
-                                st.selectbox(f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), key=f"out_{client_name}_{day}_{r_offset}", on_change=mark_changed, label_visibility="collapsed")
+                                st.selectbox(f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), key=f"out_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                 st.markdown("---")
 
             col_btn_save, col_btn_clear = st.columns([3, 1])
