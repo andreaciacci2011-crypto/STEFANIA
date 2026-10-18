@@ -15,22 +15,23 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO PER LARGHEZZA E VISIBILITÀ ORARI ---
+# --- CSS PERSONALIZZATO PER INGRANDIRE E RENDERE PERFETTAMENTE VISIBILI GLI ORARI ---
 st.markdown("""
     <style>
         [data-testid="column"] {
-            padding: 1px !important;
+            padding: 2px !important;
         }
         div[data-baseweb="select"] {
             width: 100% !important;
             min-width: 100% !important;
         }
+        /* Stile generale e altezza amplificata per le caselle orario */
         div[data-baseweb="select"] > div {
             font-size: 13px !important;
             font-weight: bold !important;
-            padding-left: 4px !important;
-            padding-right: 4px !important;
-            min-height: 32px !important;
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+            min-height: 40px !important;
             background-color: #1E222A !important;
             color: #00FF7F !important;
             border: 1px solid #366092 !important;
@@ -47,10 +48,10 @@ st.markdown("""
             margin-bottom: 4px;
         }
         .time-label {
-            font-size: 9px;
+            font-size: 10px;
             color: #4A90E2;
             font-weight: bold;
-            margin-top: 1px;
+            margin-top: 2px;
             margin-bottom: 0px;
         }
         .shift-label {
@@ -567,7 +568,9 @@ elif menu == "Riepilogo Mensile":
 
     if selected_single != "TUTTI":
         st.markdown("---")
-        pdf_a4_bytes = generate_summary_a4_pdf(selected_single, sum_type[:-1], sum_year, sum_month_idx)
+        # Passiamo la stringa intera "Operatore" o "Cliente" per evitare errori di corrispondenza
+        subject_type_str = "Operatore" if sum_type == "Operatori" else "Cliente"
+        pdf_a4_bytes = generate_summary_a4_pdf(selected_single, subject_type_str, sum_year, sum_month_idx)
         st.download_button(
             label=f"🖨️ Scarica Report PDF A4 per '{selected_single}' (Con Firme)",
             data=pdf_a4_bytes,
