@@ -7,7 +7,7 @@ import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-# ReportLab per i PDF
+# ReportLab per la generazione del PDF A3
 from reportlab.lib.pagesizes import A3, landscape
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -15,30 +15,43 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO PER OTTIMIZZARE GLI SPAZI E LA GRANDEZZA DEL TESTO ---
+# --- CSS PERSONALIZZATO PER RENDERE GLI ORARI E I SELETTORI SEMPRE LEGGIBILI ---
 st.markdown("""
     <style>
-        /* Riduce il padding complessivo delle colonne per far stare tutto sullo schermo */
+        /* Riduzione margini per contenimento griglia */
         [data-testid="column"] {
-            padding: 2px !important;
+            padding: 1px !important;
         }
-        /* Riduce la dimensione del testo e il padding dei menu a tendina Selectbox */
+        /* Styling personalizzato per i menu a tendina e selezioni */
+        div[data-baseweb="select"] {
+            min-width: 100% !important;
+        }
         div[data-baseweb="select"] > div {
             font-size: 11px !important;
+            font-weight: bold !important;
             padding-left: 2px !important;
             padding-right: 2px !important;
-            min-height: 28px !important;
+            min-height: 26px !important;
+            background-color: #1E222A !important;
+            color: #00FF7F !important;
+            border-radius: 4px !important;
         }
-        /* Stile per i badge dei giorni */
+        /* Intestazione giorni */
         .day-header {
-            background-color: #1F497D;
+            background-color: #366092;
             color: white;
             text-align: center;
             font-weight: bold;
-            font-size: 12px;
-            padding: 4px;
+            font-size: 11px;
+            padding: 3px;
             border-radius: 4px;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
+        }
+        .shift-label {
+            font-size: 10px;
+            color: #AAAAAA;
+            font-weight: bold;
+            margin-top: 2px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -122,7 +135,70 @@ def save_data_to_disk():
 if not st.session_state.operators and not st.session_state.clients:
     load_data_from_disk()
 
-# --- FUNZIONI ESPORTAZIONE ---
+# --- FUNZIONE GENERAZIONE PDF A3 IN 2 RIGHE (1-15 e 16-FINE MESE) ---
+def generate_monthly_a3_pdf(year, month_idx):
+    month_str = ITALIAN_MONTHS[month_idx - 1]
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), rightMargin=20, leftMargin=20, topMargin=20, bottomMargin=20)
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, textColor=colors.HexColor('#1F497D'), alignment=1)
+    subtitle_style = ParagraphStyle('SubTitle', parent=styles['Heading2'], fontName='Helvetica-Bold', fontSize=12, textColor=colors.HexColor('#1F497D'), alignment=0, spaceAfter=4, spaceBefore=8)
+    header_style = ParagraphStyle('Th', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=1)
+    cell_style = ParagraphStyle('Td', parent=styles['Normal'], fontName='Helvetica', fontSize=8, alignment=1)
+    client_style = ParagraphStyle('Tc', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.HexColor('#1F497D'))
+
+    elements = [Paragraph(f"PANORAMICA TURNI MENSILE — {month_str.upper()} {year}", title_style), Spacer(1, 10)]
+    num_days = calendar.monthrange(year, month_idx)[1]
+    active_clients = [c for c in st.session_state.clients if c]
+
+    part1_days = list(range(1, 16))
+    part2_days = list(range(16, num_days + 1))
+
+    def build_part_table(days_list):
+        table_data = []
+        header_row = [Paragraph("Cliente", header_style)]
+        for day in days_list:
+            wday_idx = calendar.weekday(year, month_idx, day)
+            header_row.append(Paragraph(f"{day}<br/>{ITALIAN_DAYS[wday_idx]}", header_style))
+        table_data.append(header_row)
+
+        for client_name in active_clients:
+            row = [Paragraph(client_name, client_style)]
+            for day in days_list:
+                day_shifts = []
+                for r_offset in range(3):
+                    op_val, in_val, out_val = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("", "", ""))
+                    if op_val and in_val and op_val != "Nessuno" and in_val != "--:--":
+                        day_shifts.append(f"<b>{op_val}</b> ({in_val}-{out_val})")
+                cell_txt = "<br/>".join(day_shifts) if day_shifts else "-"
+                row.append(Paragraph(cell_txt, cell_style))
+            table_data.append(row)
+
+        col_count = len(days_list)
+        client_col_w = 150
+        day_col_w = (1150 - client_col_w) / col_count
+        col_widths = [client_col_w] + [day_col_w] * col_count
+
+        t = Table(table_data, colWidths=col_widths)
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#366092')),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#B0C4DE')),
+            ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#F4F7FA')]),
+        ]))
+        return t
+
+    elements.append(Paragraph("<b>1ª METÀ DEL MESE (Giorni 1 — 15)</b>", subtitle_style))
+    elements.append(build_part_table(part1_days))
+    elements.append(Spacer(1, 15))
+    elements.append(Paragraph(f"<b>2ª METÀ DEL MESE (Giorni 16 — {num_days})</b>", subtitle_style))
+    elements.append(build_part_table(part2_days))
+
+    doc.build(elements)
+    return buffer.getvalue()
+
 def generate_excel_bytes(year, month_idx):
     month_name = ITALIAN_MONTHS[month_idx - 1]
     wb = openpyxl.Workbook()
@@ -181,54 +257,6 @@ def generate_excel_bytes(year, month_idx):
     wb.save(output)
     return output.getvalue()
 
-def generate_pdf_bytes(year, month_idx):
-    month_str = ITALIAN_MONTHS[month_idx - 1]
-    buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A3), rightMargin=25, leftMargin=25, topMargin=25, bottomMargin=25)
-    styles = getSampleStyleSheet()
-    
-    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, textColor=colors.HexColor('#1F497D'), alignment=1)
-    header_style = ParagraphStyle('Th', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=9, textColor=colors.white, alignment=1)
-    cell_style = ParagraphStyle('Td', parent=styles['Normal'], fontName='Helvetica', fontSize=8, alignment=1)
-    client_style = ParagraphStyle('Tc', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor('#1F497D'))
-
-    elements = [Paragraph(f"PANORAMICA TURNI MENSILE — {month_str.upper()} {year}", title_style), Spacer(1, 10)]
-    num_days = calendar.monthrange(year, month_idx)[1]
-    active_clients = [c for c in st.session_state.clients if c]
-
-    part1_days = list(range(1, min(16, num_days + 1)))
-
-    table_data = []
-    header_row = [Paragraph("Cliente", header_style)]
-    for day in part1_days:
-        wday_idx = calendar.weekday(year, month_idx, day)
-        header_row.append(Paragraph(f"{day}<br/>{ITALIAN_DAYS[wday_idx]}", header_style))
-    table_data.append(header_row)
-
-    for client_name in active_clients:
-        row = [Paragraph(client_name, client_style)]
-        for day in part1_days:
-            day_shifts = []
-            for r_offset in range(3):
-                op_val, in_val, out_val = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("", "", ""))
-                if op_val and in_val and op_val != "Nessuno" and in_val != "--:--":
-                    day_shifts.append(f"<b>{op_val}</b> ({in_val}-{out_val})")
-            cell_txt = "<br/>".join(day_shifts) if day_shifts else "-"
-            row.append(Paragraph(cell_txt, cell_style))
-        table_data.append(row)
-
-    col_widths = [160] + [(1140-160)/len(part1_days)] * len(part1_days)
-    t = Table(table_data, colWidths=col_widths)
-    t.setStyle(TableStyle([
-        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#366092')),
-        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
-        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#B0C4DE')),
-    ]))
-    elements.append(t)
-    doc.build(elements)
-    return buffer.getvalue()
-
 # --- INTERFACCIA WEB ---
 st.sidebar.title("📌 Menu Gestionale")
 menu = st.sidebar.radio("Seleziona Sezione", ["Pianificazione Settimanale", "Anagrafica", "Riepilogo Mensile", "Esportazioni & Stampa"])
@@ -263,7 +291,7 @@ if menu == "Anagrafica":
         save_data_to_disk()
         st.success("✅ Anagrafica salvata!")
 
-# ================= 2. PIANIFICAZIONE SETTIMANALE OTTIMIZZATA =================
+# ================= 2. PIANIFICAZIONE SETTIMANALE CON STAMPA A3 MESE COMPLETO =================
 elif menu == "Pianificazione Settimanale":
     st.title("📅 Pianificazione Turni Settimanale")
 
@@ -273,7 +301,7 @@ elif menu == "Pianificazione Settimanale":
     if not active_clients:
         st.warning("⚠️ Nessun cliente salvato. Vai prima nella sezione **Anagrafica**.")
     else:
-        c1, c2, c3 = st.columns([1, 1, 2])
+        c1, c2, c3, c4 = st.columns([1, 1, 1.5, 1.5])
         with c1:
             year = st.selectbox("Anno", [2026, 2027, 2028, 2029, 2030], index=0)
         with c2:
@@ -288,6 +316,16 @@ elif menu == "Pianificazione Settimanale":
                 "4ª Settimana (22 - 28)",
                 "5ª Settimana (29 - fine)"
             ])
+        with c4:
+            st.write("🖨️ **Stampa Mese**")
+            pdf_a3_bytes = generate_monthly_a3_pdf(year, month_idx)
+            st.download_button(
+                label="📄 Stampa PDF A3 (Mese Completo)",
+                data=pdf_a3_bytes,
+                file_name=f"Programma_A3_{month_str}_{year}.pdf",
+                mime="application/pdf",
+                type="secondary"
+            )
 
         if "1ª" in week_choice: days_to_show = list(range(1, min(8, num_days_total + 1)))
         elif "2ª" in week_choice: days_to_show = list(range(8, min(15, num_days_total + 1)))
@@ -301,7 +339,6 @@ elif menu == "Pianificazione Settimanale":
             for client_name in active_clients:
                 st.markdown(f"#### 👤 Cliente: `{client_name}`")
                 
-                # Griglia dei giorni
                 cols = st.columns(len(days_to_show))
                 
                 for d_i, day in enumerate(days_to_show):
@@ -315,7 +352,7 @@ elif menu == "Pianificazione Settimanale":
                             init_in = s_in if s_in in ALL_HOURS else "--:--"
                             init_out = s_out if s_out in ALL_HOURS else "--:--"
 
-                            st.caption(f"T{r_offset+1}")
+                            st.markdown(f"<div class='shift-label'>Turno {r_offset+1}</div>", unsafe_allow_html=True)
                             st.selectbox(f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                             
                             c_in, c_out = st.columns(2)
@@ -409,11 +446,11 @@ elif menu == "Esportazioni & Stampa":
         )
 
     with col_pdf:
-        st.subheader("📄 Stampa PDF A3")
-        pdf_data = generate_pdf_bytes(exp_year, exp_month_idx)
+        st.subheader("📄 Stampa PDF A3 (2 Righe per Mese)")
+        pdf_data = generate_monthly_a3_pdf(exp_year, exp_month_idx)
         st.download_button(
             label="🖨️ Scarica PDF Mensile A3 (.pdf)",
             data=pdf_data,
-            file_name=f"Programma_Mensile_{exp_month_str}_{exp_year}.pdf",
+            file_name=f"Programma_Mensile_A3_{exp_month_str}_{exp_year}.pdf",
             mime="application/pdf"
         )
