@@ -15,31 +15,25 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO (CASELLE ORARIO INGRANDITE E BEN VISIBILI) ---
+# --- CSS PERSONALIZZATO PER LARGHEZZA E LEGGIBILITÀ ---
 st.markdown("""
     <style>
         [data-testid="column"] {
-            padding: 1px !important;
+            padding: 2px !important;
         }
         div[data-baseweb="select"] {
             min-width: 100% !important;
         }
-        /* Stile generale selectbox operatore */
         div[data-baseweb="select"] > div {
-            font-size: 11px !important;
+            font-size: 12px !important;
             font-weight: bold !important;
-            padding-left: 2px !important;
-            padding-right: 2px !important;
-            min-height: 28px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            min-height: 34px !important;
             background-color: #1E222A !important;
             color: #00FF7F !important;
             border: 1px solid #366092 !important;
             border-radius: 4px !important;
-        }
-        /* Ingrandimento specifico altezza caselle orario In/Out per evitare tagli */
-        div.row-widget.stSelectbox div[data-baseweb="select"] div {
-            min-height: 36px !important;
-            font-size: 12px !important;
         }
         .day-header {
             background-color: #366092;
@@ -55,7 +49,7 @@ st.markdown("""
             font-size: 10px;
             color: #AAAAAA;
             font-weight: bold;
-            margin-top: 2px;
+            margin-top: 4px;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -65,6 +59,14 @@ ITALIAN_MONTHS = [
     "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
 ]
 ITALIAN_DAYS = ["LUN", "MAR", "MER", "GIO", "VEN", "SAB", "DOM"]
+
+# Generazione fasce orarie comuni predefinite (In - Out)
+SHIFT_TIME_OPTIONS = ["--:-- - --:--"]
+for h_in in range(6, 23):
+    for duration in [4, 6, 7, 8, 12]:
+        h_out = (h_in + duration) % 24
+        SHIFT_TIME_OPTIONS.append(f"{h_in:02d}:00 - {h_out:02d}:00")
+        SHIFT_TIME_OPTIONS.append(f"{h_in:02d}:30 - {h_out:02d}:30")
 
 ALL_HOURS = ["--:--"]
 for h in range(24):
@@ -150,13 +152,13 @@ def on_shift_change(client_name, year, month_idx, day, r_offset):
     v_out = st.session_state.get(k_out, "--:--")
     
     st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = (
-        "" if v_op == "Nessuno" else v_op,
-        "" if v_in == "--:--" else v_in,
-        "" if v_out == "--:--" else v_out
+        "" if v_op == "Nessuno" else str(v_op).strip(),
+        "" if v_in == "--:--" else str(v_in).strip(),
+        "" if v_out == "--:--" else str(v_out).strip()
     )
     save_data_to_disk()
 
-# --- CALLBACK SICURA PER PULIRE I TURNI ---
+# --- CALLBACK PER PULISCI TURNI ---
 def clear_shifts_callback(clients_to_clear, days_to_clear, year, month_idx):
     for client_name in clients_to_clear:
         for day in days_to_clear:
@@ -237,7 +239,7 @@ def generate_monthly_a3_pdf(year, month_idx):
     doc.build(elements)
     return buffer.getvalue()
 
-# --- GENERAZIONE PDF A4 VERTICALE CORRETTO PER OPERATORI E CLIENTI ---
+# --- GENERAZIONE PDF A4 VERTICALE PER OPERATORE O CLIENTE ---
 def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     month_str = ITALIAN_MONTHS[month_idx - 1]
     num_days = calendar.monthrange(year, month_idx)[1]
@@ -271,6 +273,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     ]]
 
     tot_hours = 0.0
+    subj_clean = str(subject_name).strip().lower()
 
     for day in range(1, num_days + 1):
         wday_idx = calendar.weekday(year, month_idx, day)
@@ -279,16 +282,14 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
         
         entries = []
         if subject_type == "Operatore":
-            # Scansiona tutti i clienti per trovare i turni assegnati a questo operatore
             for c_name in st.session_state.clients:
                 for off in range(3):
                     opv, inv, outv = st.session_state.schedule_data.get((c_name, year, month_idx, day, off), ("", "", ""))
-                    if opv == subject_name and inv and outv and inv != "--:--" and outv != "--:--":
+                    if str(opv).strip().lower() == subj_clean and inv and outv and inv != "--:--" and outv != "--:--":
                         h = calculate_shift_hours(inv, outv)
                         tot_hours += h
                         entries.append((inv, outv, f"{h:.2f} h", c_name))
         else:
-            # Scansiona i turni del cliente specifico
             for off in range(3):
                 opv, inv, outv = st.session_state.schedule_data.get((subject_name, year, month_idx, day, off), ("", "", ""))
                 if inv and outv and inv != "--:--" and outv != "--:--":
@@ -333,8 +334,8 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#B0C4DE')),
         ('ROWBACKGROUNDS', (0,1), (-1,-2), [colors.white, colors.HexColor('#F8FAFC')]),
         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#E2E8F0')),
-        ('TOPPADDING', (0,0), (-1,-1), 3),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ]))
     elements.append(t)
     elements.append(Spacer(1, 15))
@@ -509,7 +510,7 @@ elif menu == "Pianificazione Settimanale":
                         init_in = s_in if s_in in ALL_HOURS else "--:--"
                         init_out = s_out if s_out in ALL_HOURS else "--:--"
 
-                        st.markdown(f"<div class='shift-label'>Turno {r_offset+1}</div>", unsafe_allow_html=True)
+                        st.markdown(f"<div class='shift-label'>T{r_offset+1} Operatore</div>", unsafe_allow_html=True)
                         st.selectbox(
                             f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), 
                             key=f"op_{client_name}_{day}_{r_offset}", 
@@ -517,15 +518,16 @@ elif menu == "Pianificazione Settimanale":
                             label_visibility="collapsed"
                         )
                         
-                        c_in, c_out = st.columns(2)
-                        with c_in:
+                        st.markdown(f"<div class='shift-label'>T{r_offset+1} Entrata / Uscita</div>", unsafe_allow_html=True)
+                        col_in_sub, col_out_sub = st.columns(2)
+                        with col_in_sub:
                             st.selectbox(
                                 f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), 
                                 key=f"in_{client_name}_{day}_{r_offset}", 
                                 on_change=on_shift_change, args=(client_name, year, month_idx, day, r_offset),
                                 label_visibility="collapsed"
                             )
-                        with c_out:
+                        with col_out_sub:
                             st.selectbox(
                                 f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), 
                                 key=f"out_{client_name}_{day}_{r_offset}", 
@@ -580,6 +582,7 @@ elif menu == "Riepilogo Mensile":
 
     for target in display_targets:
         tot_h = 0.0
+        target_clean = str(target).strip().lower()
         for day in range(1, num_days + 1):
             if sum_type == "Clienti":
                 for off in range(3):
@@ -589,7 +592,7 @@ elif menu == "Riepilogo Mensile":
                 for c_name in st.session_state.clients:
                     for off in range(3):
                         opv, inv, outv = st.session_state.schedule_data.get((c_name, sum_year, sum_month_idx, day, off), ("", "", ""))
-                        if opv == target:
+                        if str(opv).strip().lower() == target_clean:
                             tot_h += calculate_shift_hours(inv, outv)
         grand_total += tot_h
         results.append({"Nome": target, "Totale Ore": f"{tot_h:.2f} h"})
