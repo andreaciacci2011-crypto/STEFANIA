@@ -15,6 +15,34 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
+# --- CSS PERSONALIZZATO PER OTTIMIZZARE GLI SPAZI E LA GRANDEZZA DEL TESTO ---
+st.markdown("""
+    <style>
+        /* Riduce il padding complessivo delle colonne per far stare tutto sullo schermo */
+        [data-testid="column"] {
+            padding: 2px !important;
+        }
+        /* Riduce la dimensione del testo e il padding dei menu a tendina Selectbox */
+        div[data-baseweb="select"] > div {
+            font-size: 11px !important;
+            padding-left: 2px !important;
+            padding-right: 2px !important;
+            min-height: 28px !important;
+        }
+        /* Stile per i badge dei giorni */
+        .day-header {
+            background-color: #1F497D;
+            color: white;
+            text-align: center;
+            font-weight: bold;
+            font-size: 12px;
+            padding: 4px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 ITALIAN_MONTHS = [
     "Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno",
     "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"
@@ -51,7 +79,6 @@ if "clients" not in st.session_state:
 if "schedule_data" not in st.session_state:
     st.session_state.schedule_data = {}
 
-# Gestione sicura file salvataggi
 ANAG_FILE = "anagrafica.json"
 SCHED_FILE = "turni_salvati.json"
 
@@ -236,7 +263,7 @@ if menu == "Anagrafica":
         save_data_to_disk()
         st.success("✅ Anagrafica salvata!")
 
-# ================= 2. PIANIFICAZIONE SETTIMANALE =================
+# ================= 2. PIANIFICAZIONE SETTIMANALE OTTIMIZZATA =================
 elif menu == "Pianificazione Settimanale":
     st.title("📅 Pianificazione Turni Settimanale")
 
@@ -274,29 +301,28 @@ elif menu == "Pianificazione Settimanale":
             for client_name in active_clients:
                 st.markdown(f"#### 👤 Cliente: `{client_name}`")
                 
-                cols_h = st.columns([1] + [2] * len(days_to_show))
-                cols_h[0].markdown("**Turno**")
-                for d_i, d in enumerate(days_to_show):
-                    w_i = calendar.weekday(year, month_idx, d)
-                    cols_h[d_i + 1].markdown(f"**{d} {ITALIAN_DAYS[w_i]}**")
+                # Griglia dei giorni
+                cols = st.columns(len(days_to_show))
+                
+                for d_i, day in enumerate(days_to_show):
+                    w_i = calendar.weekday(year, month_idx, day)
+                    with cols[d_i]:
+                        st.markdown(f"<div class='day-header'>{day} {ITALIAN_DAYS[w_i]}</div>", unsafe_allow_html=True)
+                        
+                        for r_offset in range(3):
+                            s_op, s_in, s_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
+                            init_op = s_op if s_op in active_ops else "Nessuno"
+                            init_in = s_in if s_in in ALL_HOURS else "--:--"
+                            init_out = s_out if s_out in ALL_HOURS else "--:--"
 
-                for r_offset in range(3):
-                    cols_r = st.columns([1] + [2] * len(days_to_show))
-                    cols_r[0].markdown(f"**T{r_offset+1}**")
-
-                    for d_i, day in enumerate(days_to_show):
-                        s_op, s_in, s_out = st.session_state.schedule_data.get((client_name, year, month_idx, day, r_offset), ("Nessuno", "--:--", "--:--"))
-                        init_op = s_op if s_op in active_ops else "Nessuno"
-                        init_in = s_in if s_in in ALL_HOURS else "--:--"
-                        init_out = s_out if s_out in ALL_HOURS else "--:--"
-
-                        with cols_r[d_i + 1]:
-                            st.selectbox("Op", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
+                            st.caption(f"T{r_offset+1}")
+                            st.selectbox(f"Op T{r_offset+1}", active_ops, index=active_ops.index(init_op), key=f"op_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
+                            
                             c_in, c_out = st.columns(2)
                             with c_in:
-                                st.selectbox("In", ALL_HOURS, index=ALL_HOURS.index(init_in), key=f"in_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
+                                st.selectbox(f"In T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_in), key=f"in_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                             with c_out:
-                                st.selectbox("Out", ALL_HOURS, index=ALL_HOURS.index(init_out), key=f"out_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
+                                st.selectbox(f"Out T{r_offset+1}", ALL_HOURS, index=ALL_HOURS.index(init_out), key=f"out_{client_name}_{day}_{r_offset}", label_visibility="collapsed")
                 st.markdown("---")
 
             save_btn = st.form_submit_button("💾 Salva Modifiche Settimana", type="primary")
@@ -314,7 +340,7 @@ elif menu == "Pianificazione Settimanale":
                                 "" if v_out == "--:--" else v_out
                             )
                 save_data_to_disk()
-                st.success("✅ Turni salvati!")
+                st.success("✅ Turni salvati con successo!")
 
 # ================= 3. RIEPILOGO MENSILE =================
 elif menu == "Riepilogo Mensile":
