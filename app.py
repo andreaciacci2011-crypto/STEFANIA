@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO AD ALTA VISIBILITÀ ---
+# --- CSS PERSONALIZZATO (CASELLE ORARIO INGRANDITE E BEN VISIBILI) ---
 st.markdown("""
     <style>
         [data-testid="column"] {
@@ -24,16 +24,22 @@ st.markdown("""
         div[data-baseweb="select"] {
             min-width: 100% !important;
         }
+        /* Stile generale selectbox operatore */
         div[data-baseweb="select"] > div {
-            font-size: 12px !important;
+            font-size: 11px !important;
             font-weight: bold !important;
-            padding-left: 4px !important;
-            padding-right: 4px !important;
+            padding-left: 2px !important;
+            padding-right: 2px !important;
             min-height: 28px !important;
             background-color: #1E222A !important;
             color: #00FF7F !important;
             border: 1px solid #366092 !important;
             border-radius: 4px !important;
+        }
+        /* Ingrandimento specifico altezza caselle orario In/Out per evitare tagli */
+        div.row-widget.stSelectbox div[data-baseweb="select"] div {
+            min-height: 36px !important;
+            font-size: 12px !important;
         }
         .day-header {
             background-color: #366092;
@@ -150,15 +156,13 @@ def on_shift_change(client_name, year, month_idx, day, r_offset):
     )
     save_data_to_disk()
 
-# --- CALLBACK SICURA PER PULIRE I TURNI (ESEGUITA PRIMA DEL RENDERING) ---
+# --- CALLBACK SICURA PER PULIRE I TURNI ---
 def clear_shifts_callback(clients_to_clear, days_to_clear, year, month_idx):
     for client_name in clients_to_clear:
         for day in days_to_clear:
             for r_offset in range(3):
-                # 1. Resetta il dizionario dei salvataggi
                 st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
                 
-                # 2. Resetta i valori dei widget in session state
                 k_op = f"op_{client_name}_{day}_{r_offset}"
                 k_in = f"in_{client_name}_{day}_{r_offset}"
                 k_out = f"out_{client_name}_{day}_{r_offset}"
@@ -233,7 +237,7 @@ def generate_monthly_a3_pdf(year, month_idx):
     doc.build(elements)
     return buffer.getvalue()
 
-# --- GENERAZIONE PDF A4 VERTICALE PER RIEPILOGO SINGOLO SOGGETTO ---
+# --- GENERAZIONE PDF A4 VERTICALE CORRETTO PER OPERATORI E CLIENTI ---
 def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     month_str = ITALIAN_MONTHS[month_idx - 1]
     num_days = calendar.monthrange(year, month_idx)[1]
@@ -275,6 +279,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
         
         entries = []
         if subject_type == "Operatore":
+            # Scansiona tutti i clienti per trovare i turni assegnati a questo operatore
             for c_name in st.session_state.clients:
                 for off in range(3):
                     opv, inv, outv = st.session_state.schedule_data.get((c_name, year, month_idx, day, off), ("", "", ""))
@@ -283,6 +288,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
                         tot_hours += h
                         entries.append((inv, outv, f"{h:.2f} h", c_name))
         else:
+            # Scansiona i turni del cliente specifico
             for off in range(3):
                 opv, inv, outv = st.session_state.schedule_data.get((subject_name, year, month_idx, day, off), ("", "", ""))
                 if inv and outv and inv != "--:--" and outv != "--:--":
@@ -327,8 +333,8 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
         ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#B0C4DE')),
         ('ROWBACKGROUNDS', (0,1), (-1,-2), [colors.white, colors.HexColor('#F8FAFC')]),
         ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#E2E8F0')),
-        ('TOPPADDING', (0,0), (-1,-1), 2),
-        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('TOPPADDING', (0,0), (-1,-1), 3),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 3),
     ]))
     elements.append(t)
     elements.append(Spacer(1, 15))
@@ -528,7 +534,6 @@ elif menu == "Pianificazione Settimanale":
                             )
             st.markdown("---")
 
-        # Pulsante di pulizia con callback per prevenire errori di ciclo vita Streamlit
         st.button(
             "🧹 Pulisci Turni Settimana (Per i clienti visibili)",
             on_click=clear_shifts_callback,
