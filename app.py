@@ -15,7 +15,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
-# --- CSS PERSONALIZZATO ---
+# --- CSS PERSONALIZZATO AD ALTA VISIBILITÀ ---
 st.markdown("""
     <style>
         [data-testid="column"] {
@@ -25,13 +25,14 @@ st.markdown("""
             min-width: 100% !important;
         }
         div[data-baseweb="select"] > div {
-            font-size: 11px !important;
+            font-size: 12px !important;
             font-weight: bold !important;
-            padding-left: 2px !important;
-            padding-right: 2px !important;
-            min-height: 26px !important;
+            padding-left: 4px !important;
+            padding-right: 4px !important;
+            min-height: 28px !important;
             background-color: #1E222A !important;
             color: #00FF7F !important;
+            border: 1px solid #366092 !important;
             border-radius: 4px !important;
         }
         .day-header {
@@ -40,7 +41,7 @@ st.markdown("""
             text-align: center;
             font-weight: bold;
             font-size: 11px;
-            padding: 3px;
+            padding: 4px;
             border-radius: 4px;
             margin-bottom: 4px;
         }
@@ -132,26 +133,6 @@ def save_data_to_disk():
 if not st.session_state.operators and not st.session_state.clients:
     load_data_from_disk()
 
-# GESTIONE RESET PULIZIA TURNI SICURA
-if st.session_state.get("need_clear", False):
-    clients_to_clear = st.session_state.get("clear_clients_list", [])
-    days_to_clear = st.session_state.get("clear_days_list", [])
-    
-    # Rimozione dallo stato dei componenti
-    keys_to_remove = []
-    for k in st.session_state.keys():
-        for c_name in clients_to_clear:
-            for d in days_to_clear:
-                for r_off in range(3):
-                    if k in [f"op_{c_name}_{d}_{r_off}", f"in_{c_name}_{d}_{r_off}", f"out_{c_name}_{d}_{r_off}"]:
-                        keys_to_remove.append(k)
-    for k in keys_to_remove:
-        if k in st.session_state:
-            del st.session_state[k]
-            
-    st.session_state.need_clear = False
-    st.rerun()
-
 # --- CALLBACK PER SALVATAGGIO AUTOMATICO ---
 def on_shift_change(client_name, year, month_idx, day, r_offset):
     k_op = f"op_{client_name}_{day}_{r_offset}"
@@ -169,7 +150,26 @@ def on_shift_change(client_name, year, month_idx, day, r_offset):
     )
     save_data_to_disk()
 
-# --- GENERAZIONE PDF A3 (PANORAMICA MENSILE) ---
+# --- CALLBACK SICURA PER PULIRE I TURNI (ESEGUITA PRIMA DEL RENDERING) ---
+def clear_shifts_callback(clients_to_clear, days_to_clear, year, month_idx):
+    for client_name in clients_to_clear:
+        for day in days_to_clear:
+            for r_offset in range(3):
+                # 1. Resetta il dizionario dei salvataggi
+                st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
+                
+                # 2. Resetta i valori dei widget in session state
+                k_op = f"op_{client_name}_{day}_{r_offset}"
+                k_in = f"in_{client_name}_{day}_{r_offset}"
+                k_out = f"out_{client_name}_{day}_{r_offset}"
+                
+                st.session_state[k_op] = "Nessuno"
+                st.session_state[k_in] = "--:--"
+                st.session_state[k_out] = "--:--"
+                
+    save_data_to_disk()
+
+# --- GENERAZIONE PDF A3 ---
 def generate_monthly_a3_pdf(year, month_idx):
     month_str = ITALIAN_MONTHS[month_idx - 1]
     buffer = io.BytesIO()
@@ -252,7 +252,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     tot_style = ParagraphStyle('Tt', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor('#1F497D'), alignment=1)
 
     elements = [
-        Paragraph(f"RESOCONTO MENSILE DANIELI / SERVIZI — {month_str.upper()} {year}", title_style),
+        Paragraph(f"RESOCONTO MENSILE TURNI — {month_str.upper()} {year}", title_style),
         Paragraph(f"<b>{subject_type.upper()}:</b> {subject_name}", sub_title_style)
     ]
 
@@ -282,7 +282,7 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
                         h = calculate_shift_hours(inv, outv)
                         tot_hours += h
                         entries.append((inv, outv, f"{h:.2f} h", c_name))
-        else: # Cliente
+        else:
             for off in range(3):
                 opv, inv, outv = st.session_state.schedule_data.get((subject_name, year, month_idx, day, off), ("", "", ""))
                 if inv and outv and inv != "--:--" and outv != "--:--":
@@ -309,7 +309,6 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
                     Paragraph(e[3], cell_style)
                 ])
 
-    # Riga totale
     table_data.append([
         Paragraph("TOTALE", tot_style),
         Paragraph("", tot_style),
@@ -334,7 +333,6 @@ def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
     elements.append(t)
     elements.append(Spacer(1, 15))
 
-    # Righe Firma in basso
     firma_type_1 = "Firma Operatore" if subject_type == "Operatore" else "Firma Cliente"
     firma_data = [
         [Paragraph(f"<b>{firma_type_1}</b>", cell_style), Paragraph("", cell_style), Paragraph("<b>Firma Responsabile / Ditta</b>", cell_style)],
@@ -530,18 +528,14 @@ elif menu == "Pianificazione Settimanale":
                             )
             st.markdown("---")
 
-        if st.button("🧹 Pulisci Turni Settimana (Per i clienti visibili)"):
-            for client_name in clients_to_display:
-                for day in days_to_show:
-                    for r_offset in range(3):
-                        st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
-            save_data_to_disk()
-            st.session_state.need_clear = True
-            st.session_state.clear_clients_list = clients_to_display
-            st.session_state.clear_days_list = days_to_show
-            st.rerun()
+        # Pulsante di pulizia con callback per prevenire errori di ciclo vita Streamlit
+        st.button(
+            "🧹 Pulisci Turni Settimana (Per i clienti visibili)",
+            on_click=clear_shifts_callback,
+            args=(clients_to_display, days_to_show, year, month_idx)
+        )
 
-# ================= 3. RIEPILOGO MENSILE CON STAMPA PDF A4 DETTAGLIATA =================
+# ================= 3. RIEPILOGO MENSILE =================
 elif menu == "Riepilogo Mensile":
     st.title("📊 Riepilogo Ore Fine Mese & Stampa A4 Dettagliata")
 
@@ -562,7 +556,6 @@ elif menu == "Riepilogo Mensile":
 
     num_days = calendar.monthrange(sum_year, sum_month_idx)[1]
 
-    # Se è selezionato un singolo soggetto, mostra il pulsante per scaricare il PDF A4
     if selected_single != "TUTTI":
         st.markdown("---")
         pdf_a4_bytes = generate_summary_a4_pdf(selected_single, sum_type[:-1], sum_year, sum_month_idx)
