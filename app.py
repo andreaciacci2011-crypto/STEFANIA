@@ -402,9 +402,10 @@ elif menu == "Pianificazione Settimanale":
                         k_in = f"in_{client_name}_{day}_{r_offset}"
                         k_out = f"out_{client_name}_{day}_{r_offset}"
                         
-                        if k_op in st.session_state: st.session_state[k_op] = "Nessuno"
-                        if k_in in st.session_state: st.session_state[k_in] = "--:--"
-                        if k_out in st.session_state: st.session_state[k_out] = "--:--"
+                        # Rimuoviamo le chiavi dallo state per pulire istantaneamente i widget
+                        if k_op in st.session_state: del st.session_state[k_op]
+                        if k_in in st.session_state: del st.session_state[k_in]
+                        if k_out in st.session_state: del st.session_state[k_out]
                             
             save_data_to_disk()
             st.warning("🧹 Tutti i turni della settimana per i clienti selezionati sono stati resettati!")
