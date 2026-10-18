@@ -7,8 +7,8 @@ import io
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-# ReportLab per la generazione del PDF A3
-from reportlab.lib.pagesizes import A3, landscape
+# ReportLab per la generazione dei PDF (A3 e A4)
+from reportlab.lib.pagesizes import A3, A4, landscape, portrait
 from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -132,6 +132,26 @@ def save_data_to_disk():
 if not st.session_state.operators and not st.session_state.clients:
     load_data_from_disk()
 
+# GESTIONE RESET PULIZIA TURNI SICURA
+if st.session_state.get("need_clear", False):
+    clients_to_clear = st.session_state.get("clear_clients_list", [])
+    days_to_clear = st.session_state.get("clear_days_list", [])
+    
+    # Rimozione dallo stato dei componenti
+    keys_to_remove = []
+    for k in st.session_state.keys():
+        for c_name in clients_to_clear:
+            for d in days_to_clear:
+                for r_off in range(3):
+                    if k in [f"op_{c_name}_{d}_{r_off}", f"in_{c_name}_{d}_{r_off}", f"out_{c_name}_{d}_{r_off}"]:
+                        keys_to_remove.append(k)
+    for k in keys_to_remove:
+        if k in st.session_state:
+            del st.session_state[k]
+            
+    st.session_state.need_clear = False
+    st.rerun()
+
 # --- CALLBACK PER SALVATAGGIO AUTOMATICO ---
 def on_shift_change(client_name, year, month_idx, day, r_offset):
     k_op = f"op_{client_name}_{day}_{r_offset}"
@@ -149,7 +169,7 @@ def on_shift_change(client_name, year, month_idx, day, r_offset):
     )
     save_data_to_disk()
 
-# --- GENERAZIONE PDF A3 ---
+# --- GENERAZIONE PDF A3 (PANORAMICA MENSILE) ---
 def generate_monthly_a3_pdf(year, month_idx):
     month_str = ITALIAN_MONTHS[month_idx - 1]
     buffer = io.BytesIO()
@@ -209,6 +229,124 @@ def generate_monthly_a3_pdf(year, month_idx):
     elements.append(Spacer(1, 15))
     elements.append(Paragraph(f"<b>2ª METÀ DEL MESE (Giorni 16 — {num_days})</b>", subtitle_style))
     elements.append(build_part_table(part2_days))
+
+    doc.build(elements)
+    return buffer.getvalue()
+
+# --- GENERAZIONE PDF A4 VERTICALE PER RIEPILOGO SINGOLO SOGGETTO ---
+def generate_summary_a4_pdf(subject_name, subject_type, year, month_idx):
+    month_str = ITALIAN_MONTHS[month_idx - 1]
+    num_days = calendar.monthrange(year, month_idx)[1]
+    
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, pagesize=portrait(A4),
+        rightMargin=25, leftMargin=25, topMargin=20, bottomMargin=20
+    )
+    styles = getSampleStyleSheet()
+    
+    title_style = ParagraphStyle('Title', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=14, textColor=colors.HexColor('#1F497D'), alignment=1, spaceAfter=2)
+    sub_title_style = ParagraphStyle('SubTitle', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=10, textColor=colors.HexColor('#333333'), alignment=1, spaceAfter=8)
+    header_style = ParagraphStyle('Th', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.white, alignment=1)
+    cell_style = ParagraphStyle('Td', parent=styles['Normal'], fontName='Helvetica', fontSize=7.5, alignment=1)
+    tot_style = ParagraphStyle('Tt', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=8, textColor=colors.HexColor('#1F497D'), alignment=1)
+
+    elements = [
+        Paragraph(f"RESOCONTO MENSILE DANIELI / SERVIZI — {month_str.upper()} {year}", title_style),
+        Paragraph(f"<b>{subject_type.upper()}:</b> {subject_name}", sub_title_style)
+    ]
+
+    other_label = "Cliente Servito" if subject_type == "Operatore" else "Operatore Preposto"
+    table_data = [[
+        Paragraph("Giorno", header_style),
+        Paragraph("Data", header_style),
+        Paragraph("Entrata", header_style),
+        Paragraph("Uscita", header_style),
+        Paragraph("Ore", header_style),
+        Paragraph(other_label, header_style)
+    ]]
+
+    tot_hours = 0.0
+
+    for day in range(1, num_days + 1):
+        wday_idx = calendar.weekday(year, month_idx, day)
+        day_str = f"{day:02d}/{month_idx:02d}/{year}"
+        wday_str = ITALIAN_DAYS[wday_idx]
+        
+        entries = []
+        if subject_type == "Operatore":
+            for c_name in st.session_state.clients:
+                for off in range(3):
+                    opv, inv, outv = st.session_state.schedule_data.get((c_name, year, month_idx, day, off), ("", "", ""))
+                    if opv == subject_name and inv and outv and inv != "--:--" and outv != "--:--":
+                        h = calculate_shift_hours(inv, outv)
+                        tot_hours += h
+                        entries.append((inv, outv, f"{h:.2f} h", c_name))
+        else: # Cliente
+            for off in range(3):
+                opv, inv, outv = st.session_state.schedule_data.get((subject_name, year, month_idx, day, off), ("", "", ""))
+                if inv and outv and inv != "--:--" and outv != "--:--":
+                    h = calculate_shift_hours(inv, outv)
+                    tot_hours += h
+                    op_disp = opv if opv else "Non specificato"
+                    entries.append((inv, outv, f"{h:.2f} h", op_disp))
+
+        if not entries:
+            table_data.append([
+                Paragraph(wday_str, cell_style),
+                Paragraph(day_str, cell_style),
+                Paragraph("-", cell_style), Paragraph("-", cell_style),
+                Paragraph("-", cell_style), Paragraph("-", cell_style)
+            ])
+        else:
+            for idx, e in enumerate(entries):
+                table_data.append([
+                    Paragraph(wday_str if idx == 0 else "", cell_style),
+                    Paragraph(day_str if idx == 0 else "", cell_style),
+                    Paragraph(e[0], cell_style),
+                    Paragraph(e[1], cell_style),
+                    Paragraph(e[2], cell_style),
+                    Paragraph(e[3], cell_style)
+                ])
+
+    # Riga totale
+    table_data.append([
+        Paragraph("TOTALE", tot_style),
+        Paragraph("", tot_style),
+        Paragraph("", tot_style),
+        Paragraph("", tot_style),
+        Paragraph(f"<b>{tot_hours:.2f} h</b>", tot_style),
+        Paragraph("", tot_style)
+    ])
+
+    col_widths = [45, 65, 55, 55, 55, 240]
+    t = Table(table_data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#366092')),
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#B0C4DE')),
+        ('ROWBACKGROUNDS', (0,1), (-1,-2), [colors.white, colors.HexColor('#F8FAFC')]),
+        ('BACKGROUND', (0,-1), (-1,-1), colors.HexColor('#E2E8F0')),
+        ('TOPPADDING', (0,0), (-1,-1), 2),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 15))
+
+    # Righe Firma in basso
+    firma_type_1 = "Firma Operatore" if subject_type == "Operatore" else "Firma Cliente"
+    firma_data = [
+        [Paragraph(f"<b>{firma_type_1}</b>", cell_style), Paragraph("", cell_style), Paragraph("<b>Firma Responsabile / Ditta</b>", cell_style)],
+        [Paragraph("_____________________________", cell_style), Paragraph("", cell_style), Paragraph("_____________________________", cell_style)]
+    ]
+    t_firma = Table(firma_data, colWidths=[220, 75, 220])
+    t_firma.setStyle(TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+        ('VALIGN', (0,0), (-1,-1), 'BOTTOM'),
+        ('TOPPADDING', (0,0), (-1,-1), 4),
+    ]))
+    elements.append(t_firma)
 
     doc.build(elements)
     return buffer.getvalue()
@@ -397,41 +535,52 @@ elif menu == "Pianificazione Settimanale":
                 for day in days_to_show:
                     for r_offset in range(3):
                         st.session_state.schedule_data[(client_name, year, month_idx, day, r_offset)] = ("", "", "")
-                        
-                        k_op = f"op_{client_name}_{day}_{r_offset}"
-                        k_in = f"in_{client_name}_{day}_{r_offset}"
-                        k_out = f"out_{client_name}_{day}_{r_offset}"
-                        
-                        # Rimuoviamo le chiavi dallo state per pulire istantaneamente i widget
-                        if k_op in st.session_state: del st.session_state[k_op]
-                        if k_in in st.session_state: del st.session_state[k_in]
-                        if k_out in st.session_state: del st.session_state[k_out]
-                            
             save_data_to_disk()
-            st.warning("🧹 Tutti i turni della settimana per i clienti selezionati sono stati resettati!")
+            st.session_state.need_clear = True
+            st.session_state.clear_clients_list = clients_to_display
+            st.session_state.clear_days_list = days_to_show
             st.rerun()
 
-# ================= 3. RIEPILOGO MENSILE =================
+# ================= 3. RIEPILOGO MENSILE CON STAMPA PDF A4 DETTAGLIATA =================
 elif menu == "Riepilogo Mensile":
-    st.title("📊 Riepilogo Ore Fine Mese")
+    st.title("📊 Riepilogo Ore Fine Mese & Stampa A4 Dettagliata")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1.5])
     with c1:
-        sum_type = st.selectbox("Soggetto", ["Clienti", "Operatori"])
+        sum_type = st.selectbox("Visualizza per", ["Operatori", "Clienti"])
     with c2:
         sum_year = st.selectbox("Anno", [2026, 2027, 2028, 2029, 2030], index=0)
     with c3:
         sum_month_str = st.selectbox("Mese", ITALIAN_MONTHS, index=9)
         sum_month_idx = ITALIAN_MONTHS.index(sum_month_str) + 1
 
-    num_days = calendar.monthrange(sum_year, sum_month_idx)[1]
-    targets = st.session_state.clients if sum_type == "Clienti" else st.session_state.operators
+    targets = st.session_state.operators if sum_type == "Operatori" else st.session_state.clients
     active_targets = [t for t in targets if t]
+
+    with c4:
+        selected_single = st.selectbox(f"Seleziona Singolo {sum_type[:-1]} per Stampa A4", ["TUTTI"] + active_targets)
+
+    num_days = calendar.monthrange(sum_year, sum_month_idx)[1]
+
+    # Se è selezionato un singolo soggetto, mostra il pulsante per scaricare il PDF A4
+    if selected_single != "TUTTI":
+        st.markdown("---")
+        pdf_a4_bytes = generate_summary_a4_pdf(selected_single, sum_type[:-1], sum_year, sum_month_idx)
+        st.download_button(
+            label=f"🖨️ Scarica Report PDF A4 per '{selected_single}' (Con Firme)",
+            data=pdf_a4_bytes,
+            file_name=f"Report_{selected_single}_{sum_month_str}_{sum_year}.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+        st.markdown("---")
 
     results = []
     grand_total = 0.0
 
-    for target in active_targets:
+    display_targets = active_targets if selected_single == "TUTTI" else [selected_single]
+
+    for target in display_targets:
         tot_h = 0.0
         for day in range(1, num_days + 1):
             if sum_type == "Clienti":
