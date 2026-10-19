@@ -16,6 +16,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 st.set_page_config(page_title="Gestione Turni Web", page_icon="📅", layout="wide")
 
 # --- CSS PERSONALIZZATO PER INGRANDIRE E RENDERE PERFETTAMENTE VISIBILI GLI ORARI ---
+# Aggiunte regole per impedire l'apertura della tastiera mobile sui menu a tendina (select)
 st.markdown("""
     <style>
         [data-testid="column"] {
@@ -36,6 +37,12 @@ st.markdown("""
             color: #00FF7F !important;
             border: 1px solid #366092 !important;
             border-radius: 4px !important;
+        }
+        /* Impedisce l'apertura della tastiera virtuale nei menu a tendina su mobile */
+        div[data-baseweb="select"] input {
+            pointer-events: none !important;
+            caret-color: transparent !important;
+            inputmode: none !important;
         }
         .day-header {
             background-color: #366092;
@@ -568,7 +575,6 @@ elif menu == "Riepilogo Mensile":
 
     if selected_single != "TUTTI":
         st.markdown("---")
-        # Passiamo la stringa intera "Operatore" o "Cliente" per evitare errori di corrispondenza
         subject_type_str = "Operatore" if sum_type == "Operatori" else "Cliente"
         pdf_a4_bytes = generate_summary_a4_pdf(selected_single, subject_type_str, sum_year, sum_month_idx)
         st.download_button(
